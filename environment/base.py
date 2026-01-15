@@ -68,9 +68,7 @@ class ContinuousEnv(gym.Env, ABC):
         self._physics_dt: Optional[float] = (
             float(physics_dt) if physics_dt is not None else None
         )
-        self.dt_default: float = (
-            self._physics_dt if self._physics_dt is not None else 1.0
-        )
+        self.dt_default: float = self.dt
 
         # Default dist for irregular sampling is two_tail_uniform.
         self.time_sampling_kwargs: Dict[str, Any] = dict(time_sampling_kwargs or {})
@@ -218,8 +216,11 @@ class ContinuousEnv(gym.Env, ABC):
         - (optionally) builds a fresh time grid for this episode
         - calls `_reset_physics` from the subclass
         """
-        # Manage our RNG
-        self._np_random, seed = gym.utils.seeding.np_random(seed)
+        # Manage the (numpy) random generator
+        if seed is not None:
+            self._np_random, seed = gym.utils.seeding.np_random(seed)
+        elif self._np_random is None:
+            self._np_random, seed = gym.utils.seeding.np_random(None)
         self.cur_t = 0.0
         self._step_index = 0
 

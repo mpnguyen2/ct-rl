@@ -8,6 +8,7 @@ from models.base import Model
 from evaluations.evaluation_helpers import (
     create_evaluation_env_and_model,
     ALGO_CLASS_MAP,
+    get_latest_run_dir,
 )
 from evaluations.evaluation_visualize import create_comparison_video
 
@@ -77,32 +78,30 @@ def run_visual_compare(config: Dict[str, Any]):
 #################################### MAIN RUN ####################################
 
 if __name__ == "__main__":
-    env_id = "humanoid-walk"
+    env_id = "trading"
     mode = "irregular_dt"
-    prefix_ct = "saved_models/ct_sac/" + env_id + "/"
-    prefix_discrete = "saved_models/discrete_benchmarks/sac/" + env_id + "/"
-    best_model = True
-    suffix = "/best_model" if best_model else ""
+    prefix = "saved_models/trading/"
+    seed = 0
+    algos = ["ct_sac", "sac"]
+    prefix_algos = [
+        prefix + algo + "/" + env_id + "/" + mode + "/seed_" + str(seed) for algo in algos
+    ]
+
+    models_to_compare = {
+        algo: {
+            "dir": get_latest_run_dir(prefix_algo) + "/best_model",
+            "algo": algo,
+        }
+        for algo, prefix_algo in zip(algos, prefix_algos)
+    }
+
     config = {
-        "models_to_compare": {
-            "CT-SAC": {
-                "dir": prefix_ct
-                + "irregular_pdt_0_005_dt_0_025_max_steps_1000_irregular_dt_2025-12-20_20-07-31"
-                + suffix,
-                "algo": "ct_sac",
-            },
-            "SB3-SAC": {
-                "dir": prefix_discrete
-                + "irregular_pdt_0_005_dt_0_025_max_steps_1000_irregular_dt_2025-12-20_20-07-50"
-                + suffix,
-                "algo": "sac",
-            },
-        },
+        "models_to_compare": models_to_compare,
         "env_id": env_id,
         "mode": mode,
         "seed": 42,
         "output_dir": "out/initial_compare/" + env_id + "/" + mode,
-        "render_interval": 1,
+        "render_interval": 10,
         "fps": 30,
     }
 

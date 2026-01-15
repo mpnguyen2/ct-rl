@@ -13,6 +13,8 @@ import numpy as np
 from environment.dmc import DMCContinuousEnv
 from environment.monitor import Monitor
 from environment.vec_env import VecContinuousEnv
+from environment.trading_env import TradingContinuousEnv
+from environment.base import ContinuousEnv
 from algorithms.ct_sac import CTSAC
 from algorithms.ct_td3 import CTTD3
 from algorithms.ct_ddpg import CTDDPG
@@ -32,7 +34,13 @@ from common.callbacks import (
 )
 
 from common.logger import configure
-from common.utils import load_ct_hyperparams_from_table, build_save_path
+from common.utils import (
+    load_ct_hyperparams_from_table,
+    build_save_path,
+    normalize_eval_range,
+    get_eval_episode_count,
+)
+from data.trading.config import TRAIN_NPZ, EVAL_NPZ, GROUPS
 
 
 def _create_action_noise_from_hyperparams(
@@ -72,19 +80,27 @@ def make_ct_env(
     seed: int,
     env_kwargs: dict,
     log_dir: Path | str | None = None,
-) -> DMCContinuousEnv:
+    npz_path: str | None = None,
+) -> ContinuousEnv:
     """
     Build a single continuous-time environment instance.
     """
-    if "-" not in env_id:
-        raise ValueError("env-id must be 'domain-task', e.g. 'cheetah-run'.")
-    domain_name, task_name = env_id.split("-", 1)
-    env = DMCContinuousEnv(
-        domain_name=domain_name,
-        task_name=task_name,
-        seed=seed,
-        **env_kwargs,
-    )
+    if env_id.startswith("trading"):
+        env = TradingContinuousEnv(
+            npz_path=npz_path,
+            seed=seed,
+            **env_kwargs,
+        )
+    else:
+        if "-" not in env_id:
+            raise ValueError("env-id must be 'domain-task', e.g. 'cheetah-run'.")
+        domain_name, task_name = env_id.split("-", 1)
+        env = DMCContinuousEnv(
+            domain_name=domain_name,
+            task_name=task_name,
+            seed=seed,
+            **env_kwargs,
+        )
 
     # Continuous-time Monitor wrapper
     if log_dir:
@@ -104,6 +120,7 @@ def run_algorithm(
     total_timesteps_override: int | None,
     desc: str,
     n_eval_episodes: int = 10,
+    eval_range: str | None = None,
 ):
     """
     Runs a single RL algorithm experiment.
@@ -135,6 +152,17 @@ def run_algorithm(
     else:
         eval_env_kwargs = env_kwargs.copy()
 
+    if env_id.startswith("trading") and eval_range is not None:
+        eval_env_kwargs = eval_env_kwargs.copy()
+        eval_range = normalize_eval_range(eval_range)
+        eval_env_kwargs["eval_range"] = eval_range
+        eval_env_kwargs["eval_cycle_tickers"] = True
+
+        # Approximate number of episodes (2-weeks trading periods)
+        n_time_windows = get_eval_episode_count(eval_range)
+        n_ticker_cycles = max(len(v) for v in GROUPS.values())
+        n_eval_episodes = n_time_windows * n_ticker_cycles
+
     if total_timesteps_override is not None:
         total_timesteps = total_timesteps_override
 
@@ -157,6 +185,7 @@ def run_algorithm(
         env_id=env_id,
         env_kwargs=env_kwargs,
         log_dir=log_dir / "train",
+        npz_path=TRAIN_NPZ,
     )
     train_env = (
         VecContinuousEnv(
@@ -168,7 +197,12 @@ def run_algorithm(
 
     # Create (vectorized) evaluation environment
     eval_n_envs = int(eval_env_kwargs.pop("n_envs", 1))
-    make_eval_env_fn = partial(make_ct_env, env_id=env_id, env_kwargs=eval_env_kwargs)
+    make_eval_env_fn = partial(
+        make_ct_env,
+        env_id=env_id,
+        env_kwargs=eval_env_kwargs,
+        npz_path=EVAL_NPZ,
+    )
     eval_env = (
         VecContinuousEnv(
             [
@@ -331,18 +365,29 @@ def parse_args():
         default=10,
         help="Number of episodes to evaluate during EvalCallback.",
     )
+    parser.add_argument(
+        "--eval_range",
+        type=str,
+        default="Q4_2025-Q4_2025",
+        help="Evaluation quarters for the trading environment",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     algos_to_run = [algo.strip() for algo in args.algos.split(",") if algo.strip()]
+    env_id = args.env_id
+    if env_id.startswith("trading"):
+        eval_range = args.eval_range
+    else:
+        eval_range = None
 
     for algo in algos_to_run:
         try:
             run_algorithm(
                 algo=algo,
-                env_id=args.env_id,
+                env_id=env_id,
                 mode=args.mode,
                 eval_mode=args.eval_mode,
                 seed=args.seed,
@@ -352,6 +397,7 @@ def main():
                 total_timesteps_override=args.total_timesteps,
                 desc=args.desc,
                 n_eval_episodes=args.n_eval_episodes,
+                eval_range=eval_range,
             )
         except (FileNotFoundError, KeyError) as e:
             print(f"\nCould not run {algo} due to a configuration error: {e}\n")

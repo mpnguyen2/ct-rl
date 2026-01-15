@@ -207,9 +207,12 @@ marimo/_lsp/
 __marimo__/
 
 # Output folder
-out/*
+data/*
 logs/*
 saved_models/*
+out/*
 cache/*
-sb3_examples/*
 experiments/*
+benchmarks/finetune/*
+benchmarks/hyperparams/*
+benchmarks/hyperparams_gen/*

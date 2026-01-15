@@ -12,6 +12,7 @@ from evaluations.evaluation_stats import (
 from evaluations.evaluation_helpers import (
     create_evaluation_env_and_model,
     ALGO_CLASS_MAP,
+    get_latest_run_dir,
 )
 
 
@@ -30,12 +31,14 @@ def run_stats_comparison(config: Dict[str, Any]):
     models_config: Dict[str, Dict[str, str]] = config["models_to_compare"]
 
     # Create a single environment instance to be shared for evaluation
+    quarters = ["Q4_2025"] if env_id.startswith("trading") else None
     env, _ = create_evaluation_env_and_model(
         env_id,
         model_class=None,  # No model needed yet
         seed=seed,
         algo="ct_sac",
         mode=mode,
+        quarters=quarters,
     )
 
     print("--- Running Numerical Benchmarks ---")
@@ -102,31 +105,30 @@ def run_stats_comparison(config: Dict[str, Any]):
 
 
 if __name__ == "__main__":
-    env_id = "quadruped-run"
+    env_id = "trading"
     mode = "irregular_dt"
-    prefix_ct = "saved_models/ct_sac/" + env_id + "/"
-    prefix_discrete = "saved_models/discrete_benchmarks/sac/" + env_id + "/"
-    best_model = True
-    suffix = "/best_model" if best_model else ""
+    prefix = "saved_models/trading/"
+    seed = 0
+    algos = ["ct_sac", "sac"]
+    prefix_algos = [
+        prefix + algo + "/" + env_id + "/" + mode + "/seed_" + str(seed)
+        for algo in algos
+    ]
+
+    models_to_compare = {
+        algo: {
+            "dir": get_latest_run_dir(prefix_algo) + "/best_model",
+            "algo": algo,
+        }
+        for algo, prefix_algo in zip(algos, prefix_algos)
+    }
+
     config = {
-        "models_to_compare": {
-            "CT-SAC": {
-                "dir": prefix_ct
-                + "irregular_pdt_0_005_dt_0_02_max_steps_2000_irregular_dt_hard_2025-12-20_18-01-20"
-                + suffix,
-                "algo": "ct_sac",
-            },
-            "SB3-SAC": {
-                "dir": prefix_discrete
-                + "irregular_pdt_0_005_dt_0_02_max_steps_2000_irregular_dt_hard_2025-12-20_18-01-54"
-                + suffix,
-                "algo": "sac",
-            },
-        },
+        "models_to_compare": models_to_compare,
         "env_id": env_id,
         "mode": mode,
-        "seed": 0,
+        "seed": seed,
         "output_dir": "out/initial_compare/" + env_id + "/" + mode,
-        "n_eval_episodes": 20,
+        "n_eval_episodes": 50,
     }
     run_stats_comparison(config)

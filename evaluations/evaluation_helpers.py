@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
+import os
+from pathlib import Path
 
 import numpy as np
 import torch as th
@@ -15,6 +17,8 @@ except ImportError:
 from environment.base import ContinuousEnv
 from environment.dmc import DMCContinuousEnv
 from environment.vec_env import VecContinuousEnv
+from environment.trading_env import TradingContinuousEnv
+from data.trading.config import EVAL_NPZ
 from models.base import Model
 from models.actor_q_critic import ActorQCriticModel
 from models.actor_v_critic import ActorVCriticModel
@@ -301,18 +305,22 @@ def create_evaluation_env_and_model(
     seed: int,
     algo: str,
     mode: Optional[str] = None,
+    hyperparams_dir: Optional[str] = None,
     env_kwargs: Optional[Dict[str, Any]] = None,
     model_kwargs: Optional[Dict[str, Any]] = None,
+    quarters: Optional[List[str]] = None,
 ) -> Tuple[ContinuousEnv, Optional[Model]]:
-    # Setup
-    if "-" not in env_id:
-        raise ValueError("env-id must be 'domain-task', e.g. 'cheetah-run'.")
-    domain_name, task_name = env_id.split("-", 1)
-
     # Load/get hyperparams
     if mode:
+        if hyperparams_dir is None:
+            hyperparams_dir = "benchmarks/hyperparams"
+            if env_id.startswith("trading"):
+                hyperparams_dir += "/trading"
+
         _, loaded_env_kwargs, loaded_model_kwargs, _, _ = (
-            load_ct_hyperparams_from_table(algo=algo, env_id=env_id, mode=mode)
+            load_ct_hyperparams_from_table(
+                algo=algo, env_id=env_id, mode=mode, hyperparams_dir=hyperparams_dir
+            )
         )
         env_kwargs = (
             loaded_env_kwargs
@@ -332,12 +340,27 @@ def create_evaluation_env_and_model(
     # Create the env
     if "n_envs" in env_kwargs:
         env_kwargs.pop("n_envs")  # Don't support visualize vectorized env yet.
-    env = DMCContinuousEnv(
-        domain_name=domain_name,
-        task_name=task_name,
-        seed=seed,
-        **env_kwargs,
-    )
+
+    if env_id.startswith("trading") and quarters is not None:
+        env_kwargs["eval_quarters"] = quarters
+        env_kwargs["eval_cycle_tickers"] = True
+
+    if env_id.startswith("trading"):
+        env = TradingContinuousEnv(
+            npz_path=EVAL_NPZ,
+            seed=seed,
+            **env_kwargs,
+        )
+    else:
+        if "-" not in env_id:
+            raise ValueError("env-id must be 'domain-task', e.g. 'cheetah-run'.")
+        domain_name, task_name = env_id.split("-", 1)
+        env = DMCContinuousEnv(
+            domain_name=domain_name,
+            task_name=task_name,
+            seed=seed,
+            **env_kwargs,
+        )
 
     # Create the model.
     model_instance = None
@@ -348,3 +371,15 @@ def create_evaluation_env_and_model(
             **model_kwargs,
         )
     return env, model_instance
+
+
+def get_latest_run_dir(base_dir: Union[str, Path]) -> str:
+    path = Path(base_dir)
+    if not path.exists():
+        return str(base_dir)
+    subdirs = [d for d in path.iterdir() if d.is_dir()]
+    if not subdirs:
+        return str(base_dir)
+
+    latest_subdir = max(subdirs, key=lambda p: p.stat().st_mtime)
+    return str(latest_subdir)

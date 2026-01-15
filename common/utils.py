@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from datetime import datetime
 from pathlib import Path
 import random
@@ -380,3 +381,51 @@ def build_save_path(
     dir.mkdir(parents=True, exist_ok=True)
 
     return dir
+
+
+def normalize_eval_range(eval_range: str) -> str:
+    """
+    Ensures eval_range is in 'START-END' format.
+    If it's a single token (e.g. 'Q4_2024'), converts to 'Q4_2024-Q4_2024'.
+    """
+    if "-" not in eval_range:
+        return f"{eval_range}-{eval_range}"
+    return eval_range
+
+
+def get_eval_episode_count(eval_range: str) -> int:
+    """
+    Heuristic to count number of evaluation episodes (time windows) based on range type.
+    Multipliers: Year=12, Quarter=6, Month=2.
+    """
+    eval_range = normalize_eval_range(eval_range)
+    start, end = eval_range.split("-")
+
+    # Year: YYYY
+    if re.match(r"^\d{4}$", start) and re.match(r"^\d{4}$", end):
+        diff = int(end) - int(start) + 1
+        return diff * 12
+
+    # Quarter: Qx_YYYY
+    m1 = re.match(r"^Q([1-4])_(\d{4})$", start)
+    m2 = re.match(r"^Q([1-4])_(\d{4})$", end)
+    if m1 and m2:
+        quarters = (
+            (int(m2.group(2)) - int(m1.group(2))) * 4
+            + (int(m2.group(1)) - int(m1.group(1)))
+            + 1
+        )
+        return quarters * 6
+
+    # Month: MM_YYYY
+    m1 = re.match(r"^(\d{1,2})_(\d{4})$", start)
+    m2 = re.match(r"^(\d{1,2})_(\d{4})$", end)
+    if m1 and m2:
+        months = (
+            (int(m2.group(2)) - int(m1.group(2))) * 12
+            + (int(m2.group(1)) - int(m1.group(1)))
+            + 1
+        )
+        return months * 2
+
+    raise ValueError(f"Unknown eval_range format: {eval_range}")

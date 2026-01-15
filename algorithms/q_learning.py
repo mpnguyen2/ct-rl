@@ -140,7 +140,7 @@ class qLearning(OffPolicyAlgorithm):
     def train(self, gradient_steps: int, batch_size: int) -> None:
         """
         Implement q-learning update using continuous-time TD error δ:
-            δ_rate = (V(x_{t+1}) - V(x_t))/dt + r_t - q(x_t, a_t) - β * V(x_t)
+            δ_rate = (V(x_{t+1}) - V(x_t)) + r_t * dt - q(x_t, a_t) * dt - β * V(x_t) * dt
 
         The parameters are updated using the gradients:
           ∇_θ V(x_t) * δ_rate

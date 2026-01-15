@@ -12,6 +12,7 @@ from itertools import count
 
 import gymnasium as gym
 from environment.dmc import DMCContinuousEnv
+from environment.trading_env import TradingContinuousEnv
 from stable_baselines3 import SAC, PPO, TD3
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.logger import configure
@@ -28,43 +29,83 @@ try:
 except ImportError:
     TRPO = None
 
-from common.utils import build_save_path, load_sb3_hyperparams_from_table
+from common.utils import (
+    build_save_path,
+    load_sb3_hyperparams_from_table,
+    normalize_eval_range,
+    get_eval_episode_count,
+)
+from data.trading.config import TRAIN_NPZ, EVAL_NPZ, GROUPS
 
 _MONITOR_COUNTER = count()
 
 
-def make_env(env_id, monitor_root, seed, env_meta=None):
-    """Build a single environment instance from DM Control suite."""
-    domain_name, task_name = env_id.split("-", 1)
+def make_env(env_id, monitor_root, seed, env_meta=None, dataset_path=None):
+    """Build a single environment instance from DM Control suite or Trading."""
 
-    # Map env_* columns (already parsed into env_meta) to DMCContinuousEnv kwargs
-    dmc_kwargs = {}
-    for k in [
-        "time_sampling",  # "uniform" / "irregular"
-        "dt",
-        "physics_dt",
-        "min_dt",
-        "max_dt",
-        "max_steps",  # step limit
-        "episode_duration",  # T
-        "time_sampling_kwargs",
-    ]:
-        if k in env_meta and env_meta[k] is not None:
-            dmc_kwargs[k] = env_meta[k]
-    if "dt" in dmc_kwargs and "physics_dt" not in dmc_kwargs:
-        dmc_kwargs["physics_dt"] = dmc_kwargs["dt"]
+    if env_id.startswith("trading"):
+        # Filter kwargs for TradingContinuousEnv
+        valid_keys = [
+            "time_sampling",
+            "dt",
+            "physics_dt",
+            "min_dt",
+            "max_dt",
+            "max_steps",
+            "episode_duration",
+            "time_sampling_kwargs",
+            "return_reward_increment",
+            "episode_days",
+            "init_capital",
+            "max_trade_fraction",
+            "transaction_cost",
+            "position_limit_fraction",
+            "eval_range",
+            "eval_cycle_tickers",
+        ]
+        kwargs = {
+            k: env_meta[k]
+            for k in valid_keys
+            if env_meta and k in env_meta and env_meta[k] is not None
+        }
 
-    env = DMCContinuousEnv(
-        domain_name=domain_name,
-        task_name=task_name,
-        seed=seed,
-        **dmc_kwargs,
-    )
+        if "dt" in kwargs and "physics_dt" not in kwargs:
+            kwargs["physics_dt"] = kwargs["dt"]
+
+        env = TradingContinuousEnv(npz_path=dataset_path, seed=seed, **kwargs)
+    else:
+        domain_name, task_name = env_id.split("-", 1)
+
+        # Map env_* columns (already parsed into env_meta) to DMCContinuousEnv kwargs
+        dmc_kwargs = {}
+        for k in [
+            "time_sampling",  # "uniform" / "irregular"
+            "dt",
+            "physics_dt",
+            "min_dt",
+            "max_dt",
+            "max_steps",  # step limit
+            "episode_duration",  # T
+            "time_sampling_kwargs",
+            "return_reward_increment",
+        ]:
+            if k in env_meta and env_meta[k] is not None:
+                dmc_kwargs[k] = env_meta[k]
+        if "dt" in dmc_kwargs and "physics_dt" not in dmc_kwargs:
+            dmc_kwargs["physics_dt"] = dmc_kwargs["dt"]
+
+        env = DMCContinuousEnv(
+            domain_name=domain_name,
+            task_name=task_name,
+            seed=seed,
+            **dmc_kwargs,
+        )
 
     # SB3 Monitor wrapper (for ep_reward_mean, ep_len_mean in TensorBoard)
     monitor_idx = next(_MONITOR_COUNTER)
     monitor_path = monitor_root / f"monitor_{os.getpid()}_{monitor_idx}.csv"
     env = Monitor(env, str(monitor_path))
+
     return env
 
 
@@ -81,6 +122,7 @@ def run_sb3_benchmark(
     desc: str,
     increment_modeling: bool,
     n_eval_episodes: int = 10,
+    eval_range: str | None = None,
 ):
     """
     Runs a single Stable-Baselines3 benchmark experiment.
@@ -103,6 +145,15 @@ def run_sb3_benchmark(
         # If eval_mode is not specified, use the same env settings as training
         eval_env_meta = env_meta.copy()
 
+    if env_id.startswith("trading") and eval_range is not None:
+        eval_env_meta = eval_env_meta.copy()
+        eval_range = normalize_eval_range(eval_range)
+        eval_env_meta["eval_range"] = eval_range
+        eval_env_meta["eval_cycle_tickers"] = True
+        n_time_windows = get_eval_episode_count(eval_range)
+        n_ticker_cycles = max(len(v) for v in GROUPS.values())
+        n_eval_episodes = n_time_windows * n_ticker_cycles
+
     if total_timesteps_override is not None:
         total_timesteps = total_timesteps_override
 
@@ -121,7 +172,11 @@ def run_sb3_benchmark(
         n_envs=n_envs,
         seed=seed,
         env_kwargs=dict(
-            env_id=env_id, monitor_root=log_dir / "train", seed=seed, env_meta=env_meta
+            env_id=env_id,
+            monitor_root=log_dir / "train",
+            seed=seed,
+            env_meta=env_meta,
+            dataset_path=TRAIN_NPZ,
         ),
     )
 
@@ -136,6 +191,7 @@ def run_sb3_benchmark(
             monitor_root=log_dir / "eval",
             seed=seed + 1000,
             env_meta=eval_env_meta,
+            dataset_path=EVAL_NPZ,
         ),
     )
 
@@ -294,12 +350,22 @@ def parse_args():
         default=10,
         help="Number of episodes to evaluate during EvalCallback.",
     )
+    parser.add_argument(
+        "--eval_range",
+        type=str,
+        default="Q4_2025-Q4_2025",
+        help="Evaluation quarters for the trading environment",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     algos_to_run = [algo.strip() for algo in args.algos.split(",") if algo.strip()]
+    if args.env_id.startswith("trading"):
+        eval_range = args.eval_range
+    else:
+        eval_range = None
 
     for algo_name in algos_to_run:
         try:
@@ -316,6 +382,7 @@ def main():
                 desc=args.desc,
                 increment_modeling=args.increment_modeling,
                 n_eval_episodes=args.n_eval_episodes,
+                eval_range=eval_range,
             )
         except (FileNotFoundError, KeyError) as e:
             print(f"\nCould not run {algo_name} due to a configuration error: {e}\n")

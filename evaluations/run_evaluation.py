@@ -7,11 +7,14 @@ import numpy as np
 from stable_baselines3.common.base_class import BaseAlgorithm
 from models.base import Model
 from environment.dmc import DMCContinuousEnv
+from environment.trading_env import TradingContinuousEnv
+from data.trading.config import EVAL_NPZ
 from evaluations.evaluation_helpers import (
     create_evaluation_env_and_model,
     evaluate_policy_per_step,
     evaluate_sb3_policy_per_step,
     ALGO_CLASS_MAP,
+    get_latest_run_dir,
 )
 from common.utils import (
     load_ct_hyperparams_from_table,
@@ -27,13 +30,17 @@ def generate_single_model_video(config):
     # Setup
     output_dir = Path(config["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_dir = config.get("checkpoint_dir")
+    dir = config.get("dir")
     env_id: str = config["env_id"]
     mode: str = config["mode"]
     algo: str = config["algo"]
     seed: int = config["seed"]
     title: str = config["title"]
     render_interval: int = config["render_interval"]
+
+    hyperparam_dir = "benchmarks/hyperparams"
+    if env_id.startswith("trading"):
+        hyperparam_dir += "/trading"
 
     if algo not in ALGO_CLASS_MAP:
         raise ValueError(
@@ -47,29 +54,35 @@ def generate_single_model_video(config):
     env_kwargs = {}
     if issubclass(model_or_algo_class, Model):
         _, env_kwargs, _, _, _ = load_ct_hyperparams_from_table(
-            algo=algo, env_id=env_id, mode=mode
+            algo=algo, env_id=env_id, mode=mode, hyperparams_dir=hyperparam_dir
         )
     elif issubclass(model_or_algo_class, BaseAlgorithm):
         _, env_kwargs, _, _, _ = load_sb3_hyperparams_from_table(
-            algo=algo, env_id=env_id, mode=mode
+            algo=algo, env_id=env_id, mode=mode, hyperparams_dir=hyperparam_dir
         )
         env_kwargs.pop("id")
-        print(env_kwargs)
 
     # Instantiate the environment directly
-    env_kwargs.pop("n_envs")
-    domain_name, task_name = env_id.split("-", 1)
-    env = DMCContinuousEnv(
-        domain_name=domain_name,
-        task_name=task_name,
-        seed=seed,
-        **env_kwargs,
-    )
+    env_kwargs.pop("n_envs", None)
+    if env_id.startswith("trading"):
+        env = TradingContinuousEnv(
+            npz_path=EVAL_NPZ,
+            seed=seed,
+            **env_kwargs,
+        )
+    else:
+        domain_name, task_name = env_id.split("-", 1)
+        env = DMCContinuousEnv(
+            domain_name=domain_name,
+            task_name=task_name,
+            seed=seed,
+            **env_kwargs,
+        )
 
     # --- Load final model ---
     print(f"--- Loading final model for {title} ---")
     final_model = None
-    if checkpoint_dir is not None:
+    if dir is not None:
         if issubclass(model_or_algo_class, Model):
             # Custom model
             _, final_model = create_evaluation_env_and_model(
@@ -80,8 +93,8 @@ def generate_single_model_video(config):
                 mode=mode,
                 env_kwargs=env_kwargs,
             )
-            # Assumes the checkpoint_dir points to the final model file or a dir with best_model
-            model_path = Path(checkpoint_dir)
+            # Assumes the dir points to the final model file or a dir with best_model
+            model_path = Path(dir)
             if model_path.is_dir():
                 model_path = model_path / "best_model.pth"
             if model_path.exists():
@@ -93,7 +106,7 @@ def generate_single_model_video(config):
                 )
         elif issubclass(model_or_algo_class, BaseAlgorithm):
             # SB3 model
-            model_path = Path(checkpoint_dir)
+            model_path = Path(dir)
             if model_path.is_dir():
                 model_path = model_path / "best_model.zip"
             best_model_path = model_path
@@ -105,10 +118,10 @@ def generate_single_model_video(config):
                     f"Warning: SB3 model file not found at {best_model_path}, skipping evaluation."
                 )
     else:
-        print("No checkpoint_dir provided. Using random policy (model=None).")
+        print("No model directory provided. Using random policy (model=None).")
 
     # --- Run Evaluation to get Frames and Metrics ---
-    if final_model is not None or checkpoint_dir is None:
+    if final_model is not None or dir is None:
         print("\n--- Running Final Evaluation for Video and Plot ---")
         if final_model is None or isinstance(final_model, Model):
             eval_results = evaluate_policy_per_step(
@@ -158,21 +171,23 @@ def generate_single_model_video(config):
 
 
 if __name__ == "__main__":
-    env_id = "quadruped-run"
-    prefix_dir = "saved_models/ct_sac/" + env_id + "/"
-    dir_name = None  # prefix_dir + "uniform_pdt_0_0025_dt_0_005_max_steps_5000_small_dt_2025-12-19_14-46-53/best_model"
-    # dir_name = "saved_models/discrete_benchmarks/sac/cheetah-run/irregular_pdt_0_002_dt_0_01_max_steps_1000_irregular_dt_hard_2025-12-17_20-04-17/best_model"
+    env_id = "trading"
+    mode = "irregular_dt"
+    prefix = "saved_models/trading/"
+    seed = 17
     algo = "ct_sac"
-    title = "CT-SAC-Walker"  # "SB3-SAC-Cheetah"  #
+    prefix_algo = prefix + algo + "/" + env_id + "/" + mode + "/seed_" + str(seed)
+
+    title = algo + "-" + env_id
     config = {
-        "checkpoint_dir": None,
+        "dir": get_latest_run_dir(prefix_algo) + "/best_model",
         "env_id": env_id,
         "algo": algo,
-        "mode": "normal",
+        "mode": mode,
         "title": title,
         "seed": 42,
         "output_dir": "out/finegrained_visualization/" + env_id,
-        "render_interval": 5,
-        "fps": 30,
+        "render_interval": 10,
+        "fps": 10,
     }
     generate_single_model_video(config)

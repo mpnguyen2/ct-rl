@@ -1,14 +1,18 @@
-cloudpickle
-dm_control
-dm_env
-gym
-gymnasium
-imageio
-matplotlib
 numpy
-opencv_python
 pandas
-sb3_contrib
-stable_baselines3
-torch
 tqdm
+matplotlib
+cloudpickle
+tensorboard
+imageio
+opencv-python
+torch
+
+# RL-related
+gymnasium
+stable-baselines3>=2.3.0
+sb3-contrib>=2.3.0
+
+# DMC
+dm_env
+dm_control
