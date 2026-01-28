@@ -38,7 +38,7 @@ class CTTD3(OffPolicyAlgorithm):
         learning_starts: int = 100,
         action_noise: Optional[ActionNoise] = None,
         # Continuous-time TD3 specific hyperparameters
-        tau: float = 0.005,  # Polyak averaging coefficient
+        tau: float = 0.005,  # Euler step
         policy_delay: int = 2,
         target_policy_noise: float = 0.2,  # Used if target_action_noise is None
         target_noise_clip: float = 0.5,
@@ -169,5 +169,5 @@ class CTTD3(OffPolicyAlgorithm):
                 for p in self.model.critic_parameters:
                     p.requires_grad = True
 
-                # (Polyak) Target update
+                # Target update
                 self.model.soft_update_targets(tau=self.tau, update_actor=True)

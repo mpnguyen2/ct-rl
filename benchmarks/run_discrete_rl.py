@@ -261,13 +261,14 @@ def run_sb3_benchmark(
     # Train
     print(
         f"\n[SB3 {algo.upper()}] env={env_id} mode={mode}\n"
-        f"total_timesteps={total_timesteps}\n\n"
+        f"total_timesteps={total_timesteps}; n_eval_episodes={n_eval_episodes}\n\n"
         f"increment_modeling={increment_modeling}"
     )
     if increment_modeling:
         print(f"  new_gamma={algo_kwargs.get('gamma')}\n")
     print(f"\npolicy_kwargs={policy_kwargs}\n")
     print(f"env_meta={env_meta}\n")
+    print(f"eval_env_meta={eval_env_meta}\n")
     model.learn(
         total_timesteps=total_timesteps,
         callback=callback,
@@ -290,12 +291,12 @@ def parse_args():
         "--env_id",
         type=str,
         default="cheetah-run",
-        help="DMC env as 'domain-task', e.g. 'cheetah-run', 'walker-walk'.",
+        help="env e.g. 'cheetah-run', 'walker-run' or 'trading'.",
     )
     parser.add_argument(
         "--mode",
         type=str,
-        default="default",
+        default="top",
         help="Mode key matching the CSV 'mode' column.",
     )
     parser.add_argument(
@@ -353,7 +354,7 @@ def parse_args():
     parser.add_argument(
         "--eval_range",
         type=str,
-        default="Q4_2025-Q4_2025",
+        default="Q3_2025",
         help="Evaluation quarters for the trading environment",
     )
     return parser.parse_args()

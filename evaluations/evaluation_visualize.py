@@ -1,285 +1,333 @@
 # evaluations/evaluation_visualize.py
 from __future__ import annotations
 
+import copy
 import re
+from bisect import bisect_right
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Type
+from typing import Dict, List, Optional, Tuple, Type, Union
 
-import numpy as np
-import imageio
 import cv2
-
+import imageio
+import numpy as np
 from stable_baselines3.common.base_class import BaseAlgorithm
+
 from environment.base import ContinuousEnv
 from models.base import Model
-from .evaluation_helpers import (
+from evaluations.evaluation_helpers import (
     evaluate_policy_per_step,
     evaluate_sb3_policy_per_step,
 )
 
 
-def _generate_episode_frames(
-    model_or_path: Union[Model, str],
-    env: ContinuousEnv,
-    is_sb3_model: bool = False,
-    sb3_algo_class: Optional[Type[BaseAlgorithm]] = None,
-    render_interval: int = 10,
-) -> List[np.ndarray]:
+# -----------------------------
+# Display name mapping
+# -----------------------------
+ALGO_DISPLAY = {
+    "ct_sac": "CT-SAC",
+    "sac": "SAC",
+    "ct_td3": "CT-TD3",
+    "td3": "TD3",
+    "ppo": "PPO",
+    "trpo": "TRPO",
+    "q_learning": "q-Learning",
+    "cppo": "CPPO",
+}
+
+
+def _display_title(raw: str) -> str:
+    if raw in ALGO_DISPLAY:
+        return ALGO_DISPLAY[raw]
+    return raw.replace("_", "-").upper()
+
+
+def _infer_frame_times(
+    episode_timestamps: List[float],
+    n_frames: int,
+    render_interval: int,
+) -> List[float]:
     """
-    Internal helper to load a model state and generate frames for one episode.
-    This function can handle both custom models and Stable-Baselines3 models.
-
-    :param model_or_path: Either a path to a model file (.pth or .zip) or an instantiated custom Model.
-    :param env: The environment to evaluate on.
-    :param is_sb3_model: Flag to indicate if the model is a Stable-Baselines3 model.
-    :param sb3_algo_class: The SB3 algorithm class (e.g., SAC) to use if loading a .zip file.
-    :return: A list of image frames for the episode.
+    evaluate_policy_per_step returns episode_timestamps at every step,
+    while episode_frames are collected every render_interval.
+    Infer timestamps for frames by sampling episode_timestamps at those indices.
     """
-    frames_list = []
-    if is_sb3_model:
-        if not isinstance(model_or_path, str) or not model_or_path.endswith(".zip"):
-            raise ValueError(
-                "For SB3 models, `model_or_path` must be a path to a .zip file."
-            )
-        if sb3_algo_class is None:
-            raise ValueError("`sb3_algo_class` must be provided for SB3 models.")
+    if not episode_timestamps or n_frames <= 0:
+        return []
 
-        model_path = model_or_path
-        print(f"  - Generating frames for SB3 model: {Path(model_path).name}")
-        sb3_model = sb3_algo_class.load(model_path, env=env)
+    idxs = list(range(0, len(episode_timestamps), max(1, render_interval)))
+    times = [float(episode_timestamps[i]) for i in idxs]
 
-        # Use the dedicated SB3 evaluation function to get frames
-        evaluate_results_dict = evaluate_sb3_policy_per_step(
-            sb3_model,
-            env,
-            n_eval_episodes=1,
-            deterministic=True,
-            render=True,
-            render_interval=render_interval,
-        )
-        frames_list = evaluate_results_dict.get("episode_frames", [])
+    # Trim/pad to match frames length
+    if len(times) > n_frames:
+        times = times[:n_frames]
+    elif len(times) < n_frames:
+        times.extend([times[-1]] * (n_frames - len(times)))
 
-    elif isinstance(model_or_path, Model):
-        # Continuous-time model evaluation
-        print(f"  - Generating frames for custom model.")
-        evaluate_results_dict = evaluate_policy_per_step(
-            model_or_path,
-            env,
-            n_eval_episodes=1,
-            deterministic=True,
-            render=True,
-            render_interval=render_interval,
-        )
-        frames_list = evaluate_results_dict.get("episode_frames", [])
+    return times
 
-    elif isinstance(model_or_path, str) and model_or_path.endswith(".pth"):
-        model_path = model_or_path
-        raise ValueError(
-            f"For .pth files ('{model_path}'), please pass an instantiated model object, not a path string."
-        )
 
-    if frames_list and frames_list[0]:
-        return frames_list[0]
-    return []
+def _pick_frame_at_time(
+    frames: List[np.ndarray],
+    times: Optional[List[float]],
+    t: Union[int, float],
+) -> Optional[np.ndarray]:
+    if not frames:
+        return None
+    if not times:
+        # fallback: treat t as index
+        if isinstance(t, int):
+            return frames[min(max(t, 0), len(frames) - 1)]
+        return frames[-1]
+
+    # rightmost time <= t
+    i = bisect_right(times, float(t)) - 1
+    i = max(0, min(i, len(frames) - 1))
+    return frames[i]
+
+
+def _add_title_bar(
+    frame: np.ndarray,
+    title: str,
+    timestamp: Optional[float],
+    *,
+    bar_h: int = 80,
+    time_unit="s",
+) -> np.ndarray:
+    """
+    Add a top bar with centered, larger title.
+    Also optionally show timestamp on second line (smaller).
+    """
+    h, w = frame.shape[:2]
+    bar = np.zeros((bar_h, w, 3), dtype=np.uint8)
+
+    title = _display_title(title)
+
+    # Title (big)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    title_scale = 1.4
+    title_th = 3
+    (tw, th), _ = cv2.getTextSize(title, font, title_scale, title_th)
+    tx = max(0, (w - tw) // 2)
+    ty = int(bar_h * 0.55)
+    cv2.putText(bar, title, (tx, ty), font, title_scale, (255, 255, 255), title_th)
+
+    # Timestamp (small)
+    if timestamp is not None:
+        if time_unit != "s":
+            ts_str = f"t = {int(timestamp)}" + time_unit
+        else:
+            ts_str = f"t = {timestamp:.3f}" + time_unit
+        ts_scale = 0.8
+        ts_th = 2
+        (sw, sh), _ = cv2.getTextSize(ts_str, font, ts_scale, ts_th)
+        sx = max(0, (w - sw) // 2)
+        sy = int(bar_h * 0.90)
+        cv2.putText(bar, ts_str, (sx, sy), font, ts_scale, (200, 200, 200), ts_th)
+
+    return np.vstack([bar, frame])
+
+
+def _choose_single_checkpoint(
+    model_dir: Union[str, Path], *, ext: str
+) -> Optional[Path]:
+    """
+    For comparison videos we want a single policy snapshot.
+    Priority:
+      1) best_model.<ext>
+      2) highest *_steps.<ext>
+      3) first lexicographic
+    """
+    p = Path(model_dir)
+    best = p / f"best_model.{ext}"
+    if best.exists():
+        return best
+
+    files = list(p.glob(f"*.{ext}"))
+    if not files:
+        return None
+
+    step_files = [f for f in files if "_steps" in f.name]
+    if step_files:
+
+        def _steps(f: Path) -> int:
+            m = re.search(r"_(\d+)_steps\." + re.escape(ext) + r"$", f.name)
+            return int(m.group(1)) if m else -1
+
+        return max(step_files, key=_steps)
+
+    return sorted(files)[0]
 
 
 def generate_progression_frames(
-    model: Model,
+    model_obj: Union[Model, Type[BaseAlgorithm]],
     model_dir: str,
     env: ContinuousEnv,
+    *,
     title: str,
     render_interval: int = 1,
-) -> List[np.ndarray]:
+) -> Tuple[List[np.ndarray], List[float]]:
     """
-    Generates a sequence of frames showing the learning progression of a custom agent.
-
-    :param model: An instance of the model (e.g., ActorQCriticModel) to load states into.
-    :param model_dir: Directory containing model files (e.g., '..._10000_steps.pth' or 'best_model.pth').
-    :param env: The environment to evaluate on.
-    :return: A list of all frames for the progression video.
+    Returns (frames, frame_times) for ONE checkpoint (best_model preferred).
     """
-    path = Path(model_dir)
-    files = list(path.glob("*.pth"))
+    # trading env is stateful (matplotlib), so clone per model
+    model_env = copy.deepcopy(env)
 
-    # Sort files: numerically if they are checkpoints, alphabetically otherwise
-    if any("_steps" in f.name for f in files):
-        files = sorted(
-            [f for f in files if "_steps" in f.name],
-            key=lambda f: int(re.search(r"_(\d+)_steps\.pth$", str(f)).group(1)),
-        )
-    else:
-        files = sorted(files)
+    try:
+        if isinstance(model_obj, Model):
+            ckpt = _choose_single_checkpoint(model_dir, ext="pth")
+            if ckpt is None:
+                print(f"No .pth found in {model_dir}")
+                return [], []
+            model_obj.load_state(str(ckpt))
 
-    if not files:
-        print(f"No .pth files found in {model_dir}")
-        return []
-
-    all_frames = []
-    for file_path in files:
-        # For continuous-time models, load state into the provided model instance
-        print(f"Processing model file: {file_path.name}")
-        model.load_state(str(file_path))
-        frames = _generate_episode_frames(
-            model, env, is_sb3_model=False, render_interval=render_interval
-        )
-
-        if frames:
-            # Add a title card before each segment
-            step_match = re.search(r"_(\d+)_steps\.pth$", str(file_path))
-            if step_match:
-                step_count = step_match.group(1)
-                card_title = f"{title}: {step_count} steps"
-            else:
-                card_title = f"{title}: {file_path.stem}"
-            title_card = np.zeros_like(frames[0])
-            cv2.putText(
-                title_card,
-                card_title,
-                (50, title_card.shape[0] // 2),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (255, 255, 255),
-                2,
+            out = evaluate_policy_per_step(
+                model_obj,
+                model_env,
+                n_eval_episodes=1,
+                deterministic=True,
+                render=True,
             )
-            # Add the title card for a short duration
-            all_frames.extend([title_card] * 60)  # 2s at 30fps
-            all_frames.extend(frames)
 
-    return all_frames
+        elif isinstance(model_obj, type) and issubclass(model_obj, BaseAlgorithm):
+            ckpt = _choose_single_checkpoint(model_dir, ext="zip")
+            if ckpt is None:
+                print(f"No .zip found in {model_dir}")
+                return [], []
+            sb3_model = model_obj.load(str(ckpt), env=model_env)
 
-
-def generate_sb3_progression_frames(
-    sb3_algo_class: Type[BaseAlgorithm],
-    model_dir: str,
-    env: ContinuousEnv,
-    title: str,
-    render_interval: int = 1,
-) -> List[np.ndarray]:
-    """
-    Generates a sequence of frames showing the learning progression of an SB3 agent.
-
-    :param sb3_algo_class: The SB3 algorithm class (e.g., `stable_baselines3.SAC`).
-    :param model_dir: Directory containing SB3 model files (e.g., '..._N_steps.zip').
-    :param env: The environment to evaluate on.
-    :return: A list of all frames for the progression video.
-    """
-    path = Path(model_dir)
-    files = list(path.glob("*.zip"))
-
-    if any("_steps" in f.name for f in files):
-        files = sorted(
-            [f for f in files if "_steps" in f.name],
-            key=lambda f: int(re.search(r"_(\d+)_steps\.zip$", str(f)).group(1)),
-        )
-    else:
-        files = sorted(files)
-
-    if not files:
-        print(f"No SB3 .zip files found in {model_dir}")
-        return []
-
-    all_frames = []
-    for file_path in files:
-        print(f"Processing SB3 model file: {file_path.name}")
-        frames = _generate_episode_frames(
-            str(file_path),
-            env,
-            is_sb3_model=True,
-            sb3_algo_class=sb3_algo_class,
-            render_interval=render_interval,
-        )
-
-        if frames:
-            # Add a title card before each segment
-            step_match = re.search(r"_(\d+)_steps\.zip$", str(file_path))
-            if step_match:
-                step_count = step_match.group(1)
-                card_title = f"{title}: {step_count} steps"
-            else:
-                card_title = f"{title}: {file_path.stem}"
-            title_card = np.zeros_like(frames[0])
-            cv2.putText(
-                title_card,
-                card_title,
-                (50, title_card.shape[0] // 2),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (255, 255, 255),
-                2,
+            out = evaluate_sb3_policy_per_step(
+                sb3_model,
+                model_env,
+                n_eval_episodes=1,
+                deterministic=True,
+                render=True,
             )
-            # Add the title card for a short duration
-            all_frames.extend([title_card] * 60)  # 2s at 30fps
-            all_frames.extend(frames)
+        else:
+            raise TypeError(f"Unsupported model type: {type(model_obj)}")
 
-    return all_frames
+        episode_frames = out.get("episode_frames", [])
+        episode_timestamps = out.get("episode_timestamps", [])
+
+        if not episode_frames:
+            return [], []
+
+        frames = episode_frames[0]
+        times = _infer_frame_times(episode_timestamps[0], len(frames), render_interval)
+        return frames, times
+
+    finally:
+        try:
+            model_env.close()
+        except Exception:
+            pass
 
 
 def create_comparison_video(
     models_to_compare: Dict[Union[Model, Type[BaseAlgorithm]], Tuple[str, str]],
     env: ContinuousEnv,
-    output_path: str,
+    output_path: Optional[Union[str, Path]],
+    *,
     render_interval: int = 1,
     fps: int = 30,
-) -> None:
+    return_frames: bool = False,
+    output_frame_path: Optional[Union[str, Path]] = None,
+):
     """
     Creates a side-by-side comparison video of multiple trained agents.
 
-    :param models_to_compare: A dictionary mapping a model object/class to its model directory and title.
-    :param env: The environment to evaluate on.
-    :param output_path: Path to save the final comparison video.
-    :param fps: Frames per second for the output video.
+    models_to_compare maps:
+      - custom Model instance OR SB3 algorithm class
+        -> (model_dir, display_title)
     """
-
-    # Generate frames for each model
-    all_model_frames = []
+    all_models = []
+    all_models_dir = []
     for model_obj, (model_dir, model_title) in models_to_compare.items():
-        if isinstance(model_obj, Model):
-            frames = generate_progression_frames(
-                model_obj,
-                model_dir,
-                env,
-                title=model_title,
-                render_interval=render_interval,
-            )
-        elif isinstance(model_obj, type) and issubclass(model_obj, BaseAlgorithm):
-            frames = generate_sb3_progression_frames(
-                model_obj,
-                model_dir,
-                env,
-                title=model_title,
-                render_interval=render_interval,
-            )
-        else:
-            raise TypeError(f"Unsupported model type in dictionary: {type(model_obj)}")
-        all_model_frames.append(frames)
+        frames, times = generate_progression_frames(
+            model_obj,
+            model_dir,
+            env,
+            title=model_title,
+            render_interval=render_interval,
+        )
+        all_models_dir.append(model_dir)
+        all_models.append((frames, times, model_title))
 
-    # Align and combine frames
-    max_len = (
-        max(len(frames) for frames in all_model_frames if frames)
-        if any(all_model_frames)
-        else 0
-    )
-    if max_len == 0:
+    if not any(frames for frames, _, _ in all_models):
         print("No frames were generated for any model. Cannot create video.")
-        return
+        return [] if return_frames else None
 
-    for i, frames in enumerate(all_model_frames):
-        # Pad shorter episodes with their last frame
-        if not frames:
-            h, w, c = all_model_frames[0][0].shape
-            all_model_frames[i] = [np.zeros((h, w, c), dtype=np.uint8)] * max_len
-        else:
-            last_frame = frames[-1]
-            padding = [last_frame] * (max_len - len(frames))
-            all_model_frames[i].extend(padding)
+    # build global time grid = union of all frame times (sorted unique)
+    time_grid = sorted({t for _, times, _ in all_models for t in (times or [])})
+    if not time_grid:
+        # fallback: align by length
+        max_len = max(len(frames) for frames, _, _ in all_models)
+        time_grid = list(range(max_len))
 
-    # Create the side-by-side video
-    combined_video_frames = []
-    for i in range(max_len):
-        frames_to_combine = [model_frames[i] for model_frames in all_model_frames]
-        combined_frame = np.hstack(frames_to_combine)
-        combined_video_frames.append(combined_frame)
+    combined_video_frames: List[np.ndarray] = []
+    is_trading = "trading" in all_models_dir[0]
+    time_unit = " mins" if is_trading else "s"
+    for t in time_grid:
+        cols = []
+        for frames, times, title in all_models:
+            frame = _pick_frame_at_time(frames, times, t)
+            if frame is None:
+                continue
+            cols.append(
+                _add_title_bar(
+                    frame,
+                    title,
+                    float(t) if isinstance(t, (int, float)) else None,
+                    time_unit=time_unit,
+                )
+            )
+        if cols:
+            # ensure same height by resizing to min height
+            min_h = min(im.shape[0] for im in cols)
+            cols = [
+                (
+                    cv2.resize(im, (im.shape[1], min_h), interpolation=cv2.INTER_AREA)
+                    if im.shape[0] != min_h
+                    else im
+                )
+                for im in cols
+            ]
+            combined_video_frames.append(np.hstack(cols))
 
-    if combined_video_frames:
-        print(f"Saving comparison video to {output_path}")
-        imageio.mimsave(output_path, combined_video_frames, fps=fps)
+    if output_path is not None and combined_video_frames:
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        imageio.mimsave(str(out), combined_video_frames, fps=fps)
+
+    # Save last frame image if requested
+    if output_frame_path is not None and combined_video_frames:
+        fp = Path(output_frame_path)
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        last = combined_video_frames[-1]
+        cv2.imwrite(str(fp), cv2.cvtColor(last, cv2.COLOR_RGB2BGR))
+
+    if return_frames:
+        return combined_video_frames
+    return None
+
+
+def create_comparison_video_and_last_frame(
+    *,
+    models_to_compare,
+    env,
+    output_video_path: Path,
+    output_frame_path: Path,
+    render_interval: int,
+    fps: int,
+):
+    """
+    Convenience wrapper: write mp4 + last png.
+    """
+    create_comparison_video(
+        models_to_compare=models_to_compare,
+        env=env,
+        output_path=output_video_path,
+        render_interval=render_interval,
+        fps=fps,
+        return_frames=False,
+        output_frame_path=output_frame_path,
+    )

@@ -1,0 +1,16 @@
+mode,env_id,env_time_sampling,env_dt,env_physics_dt,env_min_dt,env_max_dt,env_max_steps,env_episode_duration,env_time_sampling_kwargs,env_n_envs,model_v_net_arch,model_q_net_arch,model_pi_net_arch,model_activation_fn,model_log_std_init,total_timesteps,algo_gamma,algo_buffer_size,algo_learning_rate,algo_batch_size,algo_train_freq,algo_gradient_steps,algo_learning_starts,algo_alpha,algo_max_grad_norm,log_interval,log_save_freq,log_eval_freq
+top,cheetah-run,irregular,0.01,0.002,0.002,0.03,2000,10,tail_p=0.99;tail_split=0.9,1,"400,300","400,300","400,300",ReLU,-3,1000000,0.98,300000,0.00073,256,1,1,10000,auto,0.5,2000,100000,40000
+second,cheetah-run,irregular,0.01,0.002,0.002,0.03,2000,10,tail_p=0.99;tail_split=0.9,1,"400,300","400,300","400,300",ReLU,-3,1000000,0.98,300000,0.00073,256,8,8,10000,auto,0.5,2000,100000,40000
+third,cheetah-run,irregular,0.01,0.002,0.002,0.03,2000,10,tail_p=0.99;tail_split=0.9,1,"400,300","400,300","400,300",ReLU,-3,1000000,0.98,300000,0.00073,256,1,1,10000,auto,0.1,2000,100000,40000
+top,walker-run,irregular,0.025,0.0025,0.005,0.075,2000,25,tail_p=0.99;tail_split=0.9,1,"400,300","400,300","400,300",ReLU,-3,1000000,0.98,300000,0.0001825,256,1,1,10000,auto,0.5,2000,100000,40000
+second,walker-run,irregular,0.025,0.0025,0.005,0.075,2000,25,tail_p=0.99;tail_split=0.9,1,"400,300","400,300","400,300",ReLU,-3,1000000,0.98,300000,0.000365,256,1,1,10000,auto,0.25,2000,100000,40000
+third,walker-run,irregular,0.025,0.0025,0.005,0.075,2000,25,tail_p=0.99;tail_split=0.9,1,"400,300","400,300","400,300",ReLU,-1,1000000,0.98,300000,0.00073,256,1,1,10000,auto,1.0,2000,100000,40000
+top,quadruped-run,irregular,0.02,0.005,0.005,0.05,2000,20,tail_p=0.99;tail_split=0.9,8,"400,300","400,300","400,300",ReLU,-3,1000000,0.98,300000,0.000365,256,8,8,10000,auto,0.25,2000,100000,40000
+second,quadruped-run,irregular,0.02,0.005,0.005,0.05,2000,20,tail_p=0.99;tail_split=0.9,8,"400,300","400,300","400,300",ReLU,-3,1000000,0.98,300000,0.00292,256,8,8,10000,auto,1.0,2000,100000,40000
+third,quadruped-run,irregular,0.02,0.005,0.005,0.05,2000,20,tail_p=0.99;tail_split=0.9,8,"400,300","400,300","400,300",ReLU,-3,1000000,0.98,300000,0.00073,256,8,8,10000,auto,0.1,2000,100000,40000
+third,humanoid-walk,irregular,0.025,0.005,0.01,0.04,1000,25,tail_p=0.8;tail_split=0.5,1,"256,256","256,256","256,256",ReLU,-3,2000000,0.99,1000000,0.0012,64,1,1,10000,auto,1.0,2000,200000,40000
+top,humanoid-walk,irregular,0.025,0.005,0.01,0.04,1000,25,tail_p=0.8;tail_split=0.5,1,"256,256","256,256","256,256",ReLU,-1,2000000,0.99,1000000,0.0003,64,1,1,10000,auto,1.0,2000,200000,40000
+second,humanoid-walk,irregular,0.025,0.005,0.01,0.04,1000,25,tail_p=0.8;tail_split=0.5,1,"256,256","256,256","256,256",ReLU,-1,2000000,0.99,1000000,0.0006,64,4,4,10000,auto,0.25,2000,200000,40000
+second,trading,irregular,2.0,1.0,1.0,11.0,2100,4000,tail_p=0.99;tail_split=0.9,1,"400,300","400,300","400,300",ReLU,-3,1000000,0.98,300000,0.002,256,1,1,20000,auto,0.5,2000,100000,40000
+top,trading,irregular,2.0,1.0,1.0,11.0,2100,4000,tail_p=0.99;tail_split=0.9,1,"400,300","400,300","400,300",ReLU,-3,1000000,0.98,300000,0.004,256,1,1,20000,auto,1.0,2000,100000,40000
+third,trading,irregular,2.0,1.0,1.0,11.0,2100,4000,tail_p=0.99;tail_split=0.9,1,"400,300","400,300","400,300",ReLU,-1,1000000,0.98,300000,0.001,256,1,1,20000,auto,1.0,2000,100000,40000

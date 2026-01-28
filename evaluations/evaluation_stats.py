@@ -1,185 +1,170 @@
 # evaluations/evaluation_stats.py
 from __future__ import annotations
 
-import re
 from pathlib import Path
-from typing import Dict, Union, Type
+from typing import Dict, Union
 
 import numpy as np
+from stable_baselines3.common.base_class import BaseAlgorithm
 
+from environment.base import ContinuousEnv
+from models.base import Model
 from evaluations.evaluation_helpers import (
+    ALGO_CLASS_MAP,
+    create_evaluation_env_and_model,
     evaluate_policy_per_step,
     evaluate_sb3_policy_per_step,
 )
-from stable_baselines3.common.base_class import BaseAlgorithm
-from environment.base import ContinuousEnv
-from models.base import Model
 
 
-def benchmark_progression(
-    model: Model,
-    model_dir: str,
-    env: ContinuousEnv,
-    n_eval_episodes: int = 10,
-) -> Dict[str, Dict[str, float]]:
+def select_best_seed_from_eval_npz(
+    *,
+    logs_root: str | Path,
+    algo: str,
+    env_id: str,
+    mode: str,
+    metric: str = "mean_reward",
+) -> int:
     """
-    Evaluates a model's performance across multiple checkpoints and returns numerical stats.
-
-    :param model: An instance of the model (e.g., ActorQCriticModel) to load states into.
-    :param model_dir: Directory containing model files (e.g., '..._N_steps.pth' or 'best_model.pth').
-    :param env: The environment to evaluate on.
-    :param n_eval_episodes: Number of episodes to run for each checkpoint.
-    :return: A dictionary mapping step string or model name to a dict of stats {'mean_reward': ..., 'std_reward': ...}.
+    Picks the seed with the best final metric from eval npz files under:
+      logs_root/algo/env_id/mode/seed_*/eval/*.npz
     """
-    path = Path(model_dir)
-    files = list(path.glob("*.pth"))
 
-    # Sort files: numerically if they are checkpoints, alphabetically otherwise
-    if any("_steps" in f.name for f in files):
-        files = sorted(
-            [f for f in files if "_steps" in f.name],
-            key=lambda f: int(re.search(r"_(\d+)_steps\.pth$", str(f)).group(1)),
-        )
-    else:
-        files = sorted(files)
+    logs_root = Path(logs_root)
+    base = logs_root / algo / env_id / mode
 
-    if not files:
-        print(f"No .pth files found in {model_dir}")
-        return {}
+    best_seed = 0
+    best_val = -np.inf
 
-    results = {}
-    for file_path in files:
-        print(f"Benchmarking model file: {file_path.name}")
-        model.load_state(str(file_path))
+    for seed_dir in sorted(base.glob("seed_*")):
+        try:
+            seed = int(seed_dir.name.split("_")[-1])
+        except Exception:
+            continue
 
-        evaluate_results = evaluate_policy_per_step(
-            model,
-            env,
-            n_eval_episodes=n_eval_episodes,
-            deterministic=True,
-            render=False,
-        )
-        rewards = evaluate_results["episode_returns"]
+        candidates = [
+            seed_dir / "eval" / "evaluation.npz",
+            seed_dir / "eval" / "evaluations.npz",
+            seed_dir / "evaluation.npz",
+            seed_dir / "evaluations.npz",
+        ]
+        npz_path = next((p for p in candidates if p.exists()), None)
+        if npz_path is None:
+            continue
 
-        mean_reward = float(np.mean(rewards))
-        std_reward = float(np.std(rewards))
+        try:
+            data = np.load(npz_path, allow_pickle=True)
+        except Exception:
+            continue
 
-        step_match = re.search(r"_(\d+)_steps\.pth$", str(file_path))
-        if step_match:
-            key = step_match.group(1)
-        else:
-            key = file_path.stem
-        results[key] = {"mean_reward": mean_reward, "std_reward": std_reward}
-        print(
-            f"  - Step/Model '{key}': Mean Reward = {mean_reward:.2f} +/- {std_reward:.2f}"
-        )
+        val = None
 
-    return results
+        # direct metric
+        if metric in data:
+            arr = data[metric]
+            val = float(arr[-1]) if np.ndim(arr) > 0 else float(arr)
 
-
-def benchmark_sb3_progression(
-    sb3_algo_class: Type[BaseAlgorithm],
-    model_dir: str,
-    env: ContinuousEnv,
-    n_eval_episodes: int = 10,
-) -> Dict[str, Dict[str, float]]:
-    """
-    Evaluates a Stable-Baselines3 model's performance across multiple checkpoints.
-
-    :param sb3_algo_class: The SB3 algorithm class (e.g., `stable_baselines3.SAC`).
-    :param model_dir: Directory containing SB3 model files (e.g., '..._N_steps.zip').
-    :param env: The environment to evaluate on.
-    :param n_eval_episodes: Number of episodes to run for each checkpoint.
-    :return: A dictionary mapping step string or model name to a dict of stats {'mean_reward': ..., 'std_reward': ...}.
-    """
-    path = Path(model_dir)
-    files = list(path.glob("*.zip"))
-
-    if any("_steps" in f.name for f in files):
-        files = sorted(
-            [f for f in files if "_steps" in f.name],
-            key=lambda f: int(re.search(r"_(\d+)_steps\.zip$", str(f)).group(1)),
-        )
-    else:
-        files = sorted(files)
-
-    if not files:
-        print(f"No SB3 .zip files found in {model_dir}")
-        return {}
-
-    results = {}
-    for file_path in files:
-        print(f"Benchmarking SB3 model file: {file_path.name}")
-        sb3_model = sb3_algo_class.load(str(file_path), env=env)
-
-        evaluate_results = evaluate_sb3_policy_per_step(
-            sb3_model,
-            env,
-            n_eval_episodes=n_eval_episodes,
-            deterministic=True,
-            render=False,
-        )
-        rewards = evaluate_results["episode_returns"]
-        mean_reward = float(np.mean(rewards))
-        std_reward = float(np.std(rewards))
-
-        step_match = re.search(r"_(\d+)_steps\.zip$", str(file_path))
-        if step_match:
-            key = step_match.group(1)
-        else:
-            key = file_path.stem
-        results[key] = {"mean_reward": mean_reward, "std_reward": std_reward}
-        print(
-            f"  - Step/Model '{key}': Mean Reward = {mean_reward:.2f} +/- {std_reward:.2f}"
-        )
-
-    return results
-
-
-def benchmark_comparison(
-    models_to_compare: Dict[Union[Model, Type[BaseAlgorithm]], str],
-    env: ContinuousEnv,
-    n_eval_episodes: int = 10,
-) -> Dict[str, Dict[str, float]]:
-    """
-    Runs a numerical benchmark comparing multiple trained model type.
-
-    :param models_to_compare: A dictionary mapping a model object to its checkpoint path.
-    :param env: The environment to evaluate on.
-    :param n_eval_episodes: Number of episodes to run for each model.
-    :return: A dictionary mapping model name to its performance stats.
-    """
-    results = {}
-    for model_obj, model_path in models_to_compare.items():
-        model_name = Path(model_path).stem
-        print(f"Benchmarking model: {model_name}")
-
-        if isinstance(model_obj, Model):
-            # Custom model instance
-            model_obj.load_state(model_path)
-            rewards, _, _ = evaluate_policy_per_step(
-                model_obj,
-                env,
-                n_eval_episodes=n_eval_episodes,
-                deterministic=True,
-                render=False,
+        # stable-baselines style: results
+        elif "results" in data:
+            results = data["results"]
+            mean_curve = (
+                results.mean(axis=1) if results.ndim == 2 else results.astype(float)
             )
-        elif isinstance(model_obj, type) and issubclass(model_obj, BaseAlgorithm):
-            # SB3 Algorithm Class
-            sb3_model = model_obj.load(model_path, env=env)
-            rewards, _, _ = evaluate_sb3_policy_per_step(
-                sb3_model,
+            val = float(mean_curve[-1]) if metric != "max" else float(max(mean_curve))
+
+        # fallbacks
+        else:
+            for k in [
+                "episode_returns",
+                "returns",
+                "eval_returns",
+                "mean_rewards",
+                "mean_reward",
+            ]:
+                if k in data:
+                    arr = data[k]
+                    val = float(arr[-1]) if np.ndim(arr) > 0 else float(arr)
+                    break
+
+        if val is not None and val > best_val:
+            best_val = val
+            best_seed = seed
+
+    return best_seed
+
+
+def load_best_models_for_eval(
+    *,
+    algos,
+    env_id,
+    mode,
+    seed,
+    saved_models_root: Path,
+    quarters=None,
+) -> Dict[str, Union[Model, BaseAlgorithm]]:
+    """
+    Returns:
+      algo_name -> loaded model instance (custom Model or SB3 BaseAlgorithm)
+    """
+    models: Dict[str, Union[Model, BaseAlgorithm]] = {}
+
+    for algo in algos:
+        algo_cls = ALGO_CLASS_MAP[algo]
+        model_dir = (
+            saved_models_root / algo / env_id / mode / f"seed_{seed}" / "best_model"
+        )
+
+        if issubclass(algo_cls, BaseAlgorithm):
+            model = algo_cls.load(str(model_dir / "best_model.zip"), env=None)
+        else:
+            _, model = create_evaluation_env_and_model(
+                env_id=env_id,
+                model_class=algo_cls,
+                seed=seed,
+                algo=algo,
+                mode=mode,
+                quarters=quarters,
+            )
+            model.load_state(str(model_dir / "best_model.pth"))
+
+        models[algo] = model
+
+    return models
+
+
+def evaluate_algorithms_sum(
+    *,
+    models: Dict[str, Union[Model, BaseAlgorithm]],
+    env: ContinuousEnv,
+    n_eval_episodes: int,
+) -> Dict[str, float]:
+    """
+    Evaluate multiple algorithms on the SAME environment.
+
+    Returns:
+      algo -> SUM of episode returns over n_eval_episodes
+    """
+    results: Dict[str, float] = {}
+
+    for algo_name, model in models.items():
+        if isinstance(model, BaseAlgorithm):
+            out = evaluate_sb3_policy_per_step(
+                model,
                 env,
                 n_eval_episodes=n_eval_episodes,
                 deterministic=True,
                 render=False,
             )
         else:
-            raise TypeError(f"Unsupported model type in dictionary: {type(model_obj)}")
+            out = evaluate_policy_per_step(
+                model,
+                env,
+                n_eval_episodes=n_eval_episodes,
+                deterministic=True,
+                render=False,
+            )
 
-        mean_reward = float(np.mean(rewards))
-        std_reward = float(np.std(rewards))
-        results[model_name] = {"mean_reward": mean_reward, "std_reward": std_reward}
-        print(f"  - {model_name}: Mean Reward = {mean_reward:.2f} +/- {std_reward:.2f}")
+        returns = np.asarray(out["episode_returns"], dtype=float)
+        results[algo_name] = float(returns.sum())
 
     return results

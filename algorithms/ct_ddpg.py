@@ -36,7 +36,7 @@ class CTDDPG(OffPolicyAlgorithm):
         gradient_steps: int = 1,
         learning_starts: int = 100,
         action_noise: Optional[ActionNoise] = None,
-        # Polyak averaging coefficient
+        # Euler step
         tau: float = 0.005,
         # Critic loss type
         critic_loss_type: str = "mse",  # "mse" or "smooth_l1"
@@ -147,5 +147,5 @@ class CTDDPG(OffPolicyAlgorithm):
             for p in self.model.critic_parameters:
                 p.requires_grad = True
 
-            # (Polyak) Target update
+            # Target update
             self.model.soft_update_targets(tau=self.tau, update_actor=True)

@@ -34,7 +34,7 @@ class CTSAC(OffPolicyAlgorithm):
         learning_starts: int = 100,
         # CT-SAC specific hyperparameters
         alpha: float = 0.2,  # Entropy temperature. Auto means optimize alpha as well
-        tau: float = 0.005,  # Polyak averaging coefficient
+        tau: float = 0.005,  # Euler step
         num_expectation_samples: int = 1,  # Num samples for expectation approximation
         target_entropy: Union[
             float, str
@@ -125,7 +125,7 @@ class CTSAC(OffPolicyAlgorithm):
                         + (γ E_{a'}[Q̃_k(s',a')] - E_a[Q̃_k(s,a)]) / u
 
         The critic is trained to minimize MSE against Q_fast.
-        The target networks are then updated using Polyak averaging.
+        The target networks are then updated using averaging.
         """
         for _ in range(gradient_steps):
             batch: ReplayBatch = self.replay_buffer.sample(batch_size)
@@ -228,7 +228,7 @@ class CTSAC(OffPolicyAlgorithm):
             for p in self.model.critic_parameters:
                 p.requires_grad = True
 
-            # (Polyak) Target update
+            # Target update
             self.model.soft_update_targets(tau=self.tau)
 
         # Track number of gradient updates

@@ -23,7 +23,11 @@ from models.base import Model
 from models.actor_q_critic import ActorQCriticModel
 from models.actor_v_critic import ActorVCriticModel
 from models.coupled_vq import CoupledVqModel
-from common.utils import load_ct_hyperparams_from_table, get_device
+from common.utils import (
+    load_ct_hyperparams_from_table,
+    get_device,
+    normalize_eval_range,
+)
 
 
 # Global map from algorithm string to the corresponding model or algorithm class
@@ -31,6 +35,7 @@ ALGO_CLASS_MAP = {
     "ct_sac": ActorQCriticModel,
     "ct_td3": ActorQCriticModel,
     "ct_ddpg": ActorQCriticModel,
+    "q_learning": CoupledVqModel,
     "cpg": ActorVCriticModel,
     "cppo": ActorVCriticModel,
     "coupled_sarsa": CoupledVqModel,
@@ -43,88 +48,6 @@ ALGO_CLASS_MAP = {
 
 def _is_vec_env(env: Any) -> bool:
     return hasattr(env, "num_envs") and isinstance(getattr(env, "num_envs"), int)
-
-
-# Step-level evaluation
-def evaluate_policy_per_step(
-    model: Optional[Model],
-    env: ContinuousEnv,
-    n_eval_episodes: int = 10,
-    deterministic: bool = True,
-    render: bool = False,
-    render_interval: int = 10,
-) -> Dict[str, Any]:
-    """
-    Step-level eval for continuous-time model on a Single ContinuousEnv.
-
-    Returns a dict:
-      {
-        "episode_step_rewards": List[List[float]],
-        "episode_timestamps":   List[List[float]],
-        "episode_lengths":      List[int],
-        "episode_returns":      List[float],
-        "episode_frames":       Optional[List[List[np.ndarray]]],
-      }
-    """
-    episode_step_rewards: List[List[float]] = []
-    episode_timestamps: List[List[float]] = []
-    episode_lengths: List[int] = []
-    episode_returns: List[float] = []
-    episode_frames: Optional[List[List[np.ndarray]]] = [] if render else None
-
-    device = model.device if model is not None else "auto"
-    device = get_device(device)
-    for _ in range(n_eval_episodes):
-        obs, _ = env.reset()
-        obs = np.asarray(obs, dtype=np.float32)
-
-        done = False
-        step_rewards: List[float] = []
-        ts: List[float] = []
-        frames: List[np.ndarray] = []
-        step_idx = 0
-
-        while not done:
-            if model is None:
-                action = env.action_space.sample()
-            else:
-                obs_tensor = th.as_tensor(
-                    obs, dtype=th.float32, device=device
-                ).unsqueeze(0)
-                with th.no_grad():
-                    act_tensor, _ = model.act(obs_tensor, deterministic=deterministic)
-                    action = act_tensor.detach().cpu().numpy()[0]
-
-            obs_t, t, _, reward, next_obs, next_t, terminated, truncated, info = (
-                env.step_dt(action)
-            )
-            done = bool(terminated or truncated)
-
-            step_rewards.append(float(reward))
-            ts.append(float(t))
-            obs = np.asarray(next_obs, dtype=np.float32)
-
-            if render and (step_idx % render_interval == 0):
-                frame = env.render(mode="rgb_array")
-                if frame is not None:
-                    frames.append(frame)
-
-            step_idx += 1
-
-        episode_step_rewards.append(step_rewards)
-        episode_timestamps.append(ts)
-        episode_lengths.append(len(step_rewards))
-        episode_returns.append(float(np.sum(step_rewards)))
-        if render and episode_frames is not None:
-            episode_frames.append(frames)
-
-    return {
-        "episode_step_rewards": episode_step_rewards,
-        "episode_timestamps": episode_timestamps,
-        "episode_lengths": episode_lengths,
-        "episode_returns": episode_returns,
-        "episode_frames": episode_frames,
-    }
 
 
 # Episodic evaluation on either single env or vectorized(multiple)-env
@@ -239,6 +162,88 @@ def evaluate_policy_per_episode(
     return episode_returns, episode_lengths
 
 
+# Step-level evaluation
+def evaluate_policy_per_step(
+    model: Optional[Model],
+    env: ContinuousEnv,
+    n_eval_episodes: int = 10,
+    deterministic: bool = True,
+    render: bool = False,
+    render_interval: int = 10,
+) -> Dict[str, Any]:
+    """
+    Step-level eval for continuous-time model on a Single ContinuousEnv.
+
+    Returns a dict:
+      {
+        "episode_step_rewards": List[List[float]],
+        "episode_timestamps":   List[List[float]],
+        "episode_lengths":      List[int],
+        "episode_returns":      List[float],
+        "episode_frames":       Optional[List[List[np.ndarray]]],
+      }
+    """
+    episode_step_rewards: List[List[float]] = []
+    episode_timestamps: List[List[float]] = []
+    episode_lengths: List[int] = []
+    episode_returns: List[float] = []
+    episode_frames: Optional[List[List[np.ndarray]]] = [] if render else None
+
+    device = model.device if model is not None else "auto"
+    device = get_device(device)
+    for _ in range(n_eval_episodes):
+        obs, _ = env.reset()
+        obs = np.asarray(obs, dtype=np.float32)
+
+        done = False
+        step_rewards: List[float] = []
+        ts: List[float] = []
+        frames: List[np.ndarray] = []
+        step_idx = 0
+
+        while not done:
+            if model is None:
+                action = env.action_space.sample()
+            else:
+                obs_tensor = th.as_tensor(
+                    obs, dtype=th.float32, device=device
+                ).unsqueeze(0)
+                with th.no_grad():
+                    act_tensor, _ = model.act(obs_tensor, deterministic=deterministic)
+                    action = act_tensor.detach().cpu().numpy()[0]
+
+            obs_t, t, _, reward, next_obs, next_t, terminated, truncated, info = (
+                env.step_dt(action)
+            )
+            done = bool(terminated or truncated)
+
+            step_rewards.append(float(reward))
+            ts.append(float(t))
+            obs = np.asarray(next_obs, dtype=np.float32)
+
+            if render and (step_idx % render_interval == 0):
+                frame = env.render(mode="rgb_array")
+                if frame is not None:
+                    frames.append(frame)
+
+            step_idx += 1
+
+        episode_step_rewards.append(step_rewards)
+        episode_timestamps.append(ts)
+        episode_lengths.append(len(step_rewards))
+        episode_returns.append(float(np.sum(step_rewards)))
+        if render and episode_frames is not None:
+            episode_frames.append(frames)
+
+    return {
+        "episode_step_rewards": episode_step_rewards,
+        "episode_timestamps": episode_timestamps,
+        "episode_lengths": episode_lengths,
+        "episode_returns": episode_returns,
+        "episode_frames": episode_frames,
+    }
+
+
 def evaluate_sb3_policy_per_step(
     sb3_model: Any,
     env: ContinuousEnv,
@@ -299,6 +304,32 @@ def evaluate_sb3_policy_per_step(
     }
 
 
+def _force_dmc_regular_time(env) -> None:
+    """
+    For DMC envs, force "regular" mode to match dm_control's default control timestep.
+    This overrides any irregular/small-time settings that may be present in env_kwargs.
+    """
+    try:
+        if hasattr(env, "time_sampling"):
+            env.time_sampling = "uniform"
+
+        # DMCContinuousEnv defines dt_default = env.control_timestep (dm_control)
+        if hasattr(env, "dt_default"):
+            env.dt = float(env.dt_default)
+
+        # Clear irregular bounds if present
+        if hasattr(env, "min_dt"):
+            env.min_dt = None
+        if hasattr(env, "max_dt"):
+            env.max_dt = None
+        if hasattr(env, "time_sampling_kwargs"):
+            env.time_sampling_kwargs = {}
+
+    except Exception:
+        # best effort only; don't crash evaluation
+        pass
+
+
 def create_evaluation_env_and_model(
     env_id: str,
     model_class: Optional[Type[Model]],
@@ -314,35 +345,43 @@ def create_evaluation_env_and_model(
     if mode:
         if hyperparams_dir is None:
             hyperparams_dir = "benchmarks/hyperparams"
-            if env_id.startswith("trading"):
-                hyperparams_dir += "/trading"
-
-        _, loaded_env_kwargs, loaded_model_kwargs, _, _ = (
-            load_ct_hyperparams_from_table(
-                algo=algo, env_id=env_id, mode=mode, hyperparams_dir=hyperparams_dir
+        try:
+            # mode = "top" to help load model kwargs
+            _, loaded_env_kwargs, loaded_model_kwargs, _, _ = (
+                load_ct_hyperparams_from_table(
+                    algo=algo,
+                    env_id=env_id,
+                    mode="top",
+                    hyperparams_dir=hyperparams_dir,
+                )
             )
-        )
-        env_kwargs = (
-            loaded_env_kwargs
-            if env_kwargs is None
-            else {**loaded_env_kwargs, **env_kwargs}
-        )
-        model_kwargs = (
-            loaded_model_kwargs
-            if model_kwargs is None
-            else {**loaded_model_kwargs, **model_kwargs}
-        )
-    elif env_kwargs is None or model_kwargs is None:
-        raise ValueError(
-            "Either 'mode' or both 'env_kwargs' and 'model_kwargs' must be provided."
-        )
+            env_kwargs = (
+                loaded_env_kwargs
+                if env_kwargs is None
+                else {**loaded_env_kwargs, **env_kwargs}
+            )
+            model_kwargs = (
+                loaded_model_kwargs
+                if model_kwargs is None
+                else {**loaded_model_kwargs, **model_kwargs}
+            )
+        except Exception as e:
+            print(
+                f"[WARN] Failed to load hyperparams for (algo={algo}, env={env_id}, mode={mode}): {e}"
+            )
+            print("[WARN] Falling back to mode='regular' env defaults.")
+            env_kwargs = dict(env_kwargs or {})
+            model_kwargs = dict(model_kwargs or {})
+    else:
+        print(f"[WARN] Unknown mode for (algo={algo}, env={env_id})")
+        return None, None
 
     # Create the env
     if "n_envs" in env_kwargs:
         env_kwargs.pop("n_envs")  # Don't support visualize vectorized env yet.
 
     if env_id.startswith("trading") and quarters is not None:
-        env_kwargs["eval_quarters"] = quarters
+        env_kwargs["eval_range"] = normalize_eval_range(quarters)
         env_kwargs["eval_cycle_tickers"] = True
 
     if env_id.startswith("trading"):
@@ -361,6 +400,10 @@ def create_evaluation_env_and_model(
             seed=seed,
             **env_kwargs,
         )
+
+    # DMC regular mode: dm_control default dt
+    if env_id != "trading" and mode in {"regular", "normal"}:
+        _force_dmc_regular_time(env)
 
     # Create the model.
     model_instance = None

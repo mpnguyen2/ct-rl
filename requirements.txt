@@ -10,8 +10,8 @@ torch
 
 # RL-related
 gymnasium
-stable-baselines3>=2.3.0
-sb3-contrib>=2.3.0
+stable-baselines3
+sb3-contrib
 
 # DMC
 dm_env

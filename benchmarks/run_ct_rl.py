@@ -283,8 +283,9 @@ def run_algorithm(
     env_kwargs["eval_n_envs"] = eval_n_envs
     print(
         f"\n[{algo.upper()}] env={env_id} mode={mode}\n"
-        f"total_timesteps={total_timesteps}\n\n"
+        f"total_timesteps={total_timesteps}; n_eval_episodes={n_eval_episodes}\n\n"
         f"env_kwargs={env_kwargs}\n\n"
+        f"eval_env_kwargs={eval_env_kwargs}\n\n"
         f"model_kwargs={model_kwargs}\n\n"
         f"algo_kwargs={algo_kwargs}\n\n"
         f"log_kwargs={log_kwargs}\n\n"
@@ -310,12 +311,12 @@ def parse_args():
         "--env_id",
         type=str,
         default="cheetah-run",
-        help="DMC env as 'domain-task', e.g. 'cheetah-run', 'walker-walk'.",
+        help="env e.g. 'cheetah-run', 'walker-run' or 'trading'.",
     )
     parser.add_argument(
         "--mode",
         type=str,
-        default="default",
+        default="top",
         help="Mode key matching the CSV row",
     )
     parser.add_argument(
@@ -368,7 +369,7 @@ def parse_args():
     parser.add_argument(
         "--eval_range",
         type=str,
-        default="Q4_2025-Q4_2025",
+        default="Q3_2025",
         help="Evaluation quarters for the trading environment",
     )
     return parser.parse_args()

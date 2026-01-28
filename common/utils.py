@@ -395,7 +395,7 @@ def normalize_eval_range(eval_range: str) -> str:
 
 def get_eval_episode_count(eval_range: str) -> int:
     """
-    Heuristic to count number of evaluation episodes (time windows) based on range type.
+    Count number of evaluation episodes (time windows) based on range type.
     Multipliers: Year=12, Quarter=6, Month=2.
     """
     eval_range = normalize_eval_range(eval_range)
