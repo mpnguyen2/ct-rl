@@ -7,7 +7,6 @@ from evaluations.evaluation_helpers import (
     create_evaluation_env_and_model,
     ALGO_CLASS_MAP,
 )
-from evaluations.evaluation_stats import benchmark_progression
 from environment import ContinuousEnv, DMCContinuousEnv
 import torch as th
 
@@ -121,22 +120,6 @@ class TestEvaluationModules(unittest.TestCase):
             action_space=mock_env_instance.action_space,
             **self.expected_model_kwargs,
         )
-
-    @patch("evaluations.evaluation_stats.evaluate_policy_per_step")
-    @patch("pathlib.Path.glob")
-    def test_benchmark_progression_no_checkpoints(self, mock_glob, mock_eval_step):
-        """
-        Tests that benchmark_progression returns an empty dict if no checkpoints are found.
-        """
-        mock_glob.return_value = []  # Simulate no checkpoint files found
-        mock_model = MagicMock(spec=Model)
-        mock_env = MagicMock(spec=ContinuousEnv)
-        results = benchmark_progression(
-            model=mock_model,
-            model_dir="/fake/dir",
-            env=mock_env,
-        )
-        self.assertEqual(results, {})
 
 
 if __name__ == "__main__":

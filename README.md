@@ -52,6 +52,18 @@ python -m benchmarks.run_discrete_rl --algo sac --env_id cheetah-run --log_root 
 
 This repository includes a comprehensive evaluation pipeline to generate plots, tables, and statistical tests.
 
+### Large Assets & Pre-trained Models
+
+The `logs`, `saved_models`, and `data/trading/processed_data` asset folders are too large to be included directly in the repository. They are hosted on SwissTransfer via 2 different links. Because these links expire every month due to SwissTransfer's policy, they will be updated here frequently for reproducibility:
+
+Link1: [https://www.swisstransfer.com/d/702cbd8d-825c-4a69-bc67-79383c210482](https://www.swisstransfer.com/d/702cbd8d-825c-4a69-bc67-79383c210482)
+
+Link2: [https://www.swisstransfer.com/d/172ac0ef-4423-4e28-80e0-a9e962709066](https://www.swisstransfer.com/d/172ac0ef-4423-4e28-80e0-a9e962709066)
+
+Password: icml2026
+
+Please download from these SwissTransfer links the following folders `logs`, `saved_models`, and `data/trading/processed_data` in order to get train logs, saved checkpoints, and trading processed features. After that, please proceed to the below steps for reproducing our reports.
+
 ### Performance Report
 To generate the full performance report from trained logs:
 
@@ -80,8 +92,8 @@ python -m evaluations.evaluation_on_regular
 
 If using the `trading` environment, you need to download and preprocess the data first.
 
-1.  **Download Data**: Use `data/download_data.py` to fetch data using the Alpaca API.
-2.  **Process Data**: Use `data/preprocess_data.py` to generate the feature sets required for the environment.
+1.  **Download Data**: Use `data/trading/download_data.py` to fetch data using the Alpaca API.
+2.  **Process Data**: Use `data/trading/preprocess_data.py` to generate the feature sets required for the environment.
 
 ## Directory Structure
 
