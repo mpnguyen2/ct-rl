@@ -23,6 +23,7 @@ ALGO_DISPLAY_DEFAULT: Dict[str, str] = {
     "q_learning": "q-Learning",
     "ct_td3": "CT-TD3",
     "sac_increment_modeling": "SAC-increment modeling",
+    "sac_time_aware": "SAC-time-aware",
 }
 
 # Evaluation and warm-up steps

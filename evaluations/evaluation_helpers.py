@@ -40,6 +40,7 @@ ALGO_CLASS_MAP = {
     "cppo": ActorVCriticModel,
     "coupled_sarsa": CoupledVqModel,
     "sac": SAC,
+    "sac_time_aware": SAC,
     "td3": TD3,
     "ppo": PPO,
     "trpo": TRPO,

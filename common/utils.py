@@ -171,6 +171,7 @@ def load_sb3_hyperparams_from_table(
     algo = algo.lower()
     filename_map = {
         "sac": "sac.csv",
+        "sac_time_aware": "sac_time_aware.csv",
         "ppo": "ppo.csv",
         "trpo": "trpo.csv",
         "td3": "td3.csv",

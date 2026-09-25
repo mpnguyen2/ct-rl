@@ -48,6 +48,7 @@ ALGOS_ALL = [
 ALGOS_CTSAC_VS_INCREMENT_MODELING = [
     "ct_sac",
     "sac",
+    "sac_time_aware",
     "sac_increment_modeling",
 ]
 
@@ -217,7 +218,12 @@ def main():
             xtick_fontsize=11.5,
             ylabel_fontsize=11.5,
             ytick_fontsize=11.5,
-            legend_row1=["CT-SAC", "SAC", "SAC-increment modeling"],
+            legend_row1=[
+                "CT-SAC",
+                "SAC",
+                "SAC-time-aware",
+                "SAC-increment modeling",
+            ],
             legend_row2=None,
         )
 
@@ -237,7 +243,12 @@ def main():
             xtick_fontsize=12,
             ylabel_fontsize=14,
             ytick_fontsize=12,
-            legend_row1=["CT-SAC", "SAC", "SAC-increment modeling"],
+            legend_row1=[
+                "CT-SAC",
+                "SAC",
+                "SAC-time-aware",
+                "SAC-increment modeling",
+            ],
             legend_row2=None,
         )
 
@@ -276,6 +287,7 @@ def main():
             "cppo",
             "q_learning",
             "ct_td3",
+            "sac_time_aware",
             "sac_increment_modeling",
         ]
 

@@ -309,6 +309,11 @@ class ContinuousEnv(gym.Env, ABC):
             and self.cur_t >= self.episode_duration - 1e-9
         ):
             time_limit_reached = True
+        if (
+            self._time_points is not None
+            and self._step_index >= len(self._time_points) - 1
+        ):
+            time_limit_reached = True
         if self.max_steps is not None and self._step_index >= self.max_steps:
             time_limit_reached = True
 
@@ -316,6 +321,12 @@ class ContinuousEnv(gym.Env, ABC):
             truncated = True
             info = dict(info)  # copy to avoid mutating downstream references
             info.setdefault("time_limit_reached", True)
+
+        # Gym/SB3 consumers do not receive the timestamps returned by step_dt.
+        # Keep the actual elapsed time in info so a replay buffer can apply a
+        # transition-specific continuous-time discount.
+        info = dict(info)
+        info["dt"] = dt_used
 
         return (
             obs,

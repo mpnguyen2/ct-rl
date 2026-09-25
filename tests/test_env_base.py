@@ -150,6 +150,10 @@ class TestDummyLinearEnv(unittest.TestCase):
             self.assertFalse(terminated)
             if k < num_steps - 1:
                 self.assertFalse(truncated)
+            else:
+                self.assertTrue(truncated)
+                self.assertTrue(info.get("time_limit_reached", False))
+            self.assertGreater(info["dt"], 0.0)
 
         # One more step: should truncate / not advance time
         (

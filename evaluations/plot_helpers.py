@@ -29,6 +29,7 @@ ALGO_COLORS: Dict[str, str] = {
     "q_learning": "#e377c2",  # pink
     "ct_td3": "#17becf",  # cyan
     "sac_increment_modeling": "#ff7f0e",  # orange
+    "sac_time_aware": "#228B22",  # forest green
 }
 
 # Trading plot config

@@ -215,5 +215,6 @@ cache/*
 experimental/*
 benchmarks/*
 !benchmarks/*.py
+!benchmarks/*.sh
 !benchmarks/hyperparams/
 !benchmarks/hyperparams/*

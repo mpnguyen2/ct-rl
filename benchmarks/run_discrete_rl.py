@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from functools import partial
 import argparse
+import math
 from pathlib import Path
 import os
 from itertools import count
@@ -23,6 +24,8 @@ from stable_baselines3.common.callbacks import (
     CallbackList,
     LogEveryNTimesteps,
 )
+
+from algorithms.time_aware_replay_buffer import TimeAwareReplayBuffer
 
 try:
     from sb3_contrib import TRPO
@@ -121,6 +124,7 @@ def run_sb3_benchmark(
     total_timesteps_override: int | None,
     desc: str,
     increment_modeling: bool,
+    device: str,
     n_eval_episodes: int = 10,
     eval_range: str | None = None,
 ):
@@ -157,8 +161,10 @@ def run_sb3_benchmark(
     if total_timesteps_override is not None:
         total_timesteps = total_timesteps_override
 
-    # If increment modeling is enabled, adjust env
-    if increment_modeling:
+    time_aware = algo == "sac_time_aware"
+
+    # Both increment baselines model the reward accumulated over each interval.
+    if increment_modeling or time_aware:
         env_meta["return_reward_increment"] = True
 
     # Build logs and saved_models save paths
@@ -195,15 +201,26 @@ def run_sb3_benchmark(
         ),
     )
 
-    # If increment modeling, adjust algo parameters gamma
+    # Existing baselines use one fixed discount. Time-aware SAC instead passes
+    # a discount per replay transition, computed from its actual dt.
     dt = env_meta.get("dt")
-    if dt is not None and "gamma" in algo_kwargs:
+    if not time_aware and dt is not None and "gamma" in algo_kwargs:
         original_gamma = algo_kwargs["gamma"]
         dt_default = train_env.get_attr("dt_default", indices=0)[0]
         algo_kwargs["gamma"] = original_gamma ** (dt / dt_default)
 
+    if time_aware:
+        if "gamma" not in algo_kwargs:
+            raise KeyError("sac_time_aware requires gamma in its hyperparameters")
+        dt_default = train_env.get_attr("dt_default", indices=0)[0]
+        algo_kwargs["replay_buffer_class"] = TimeAwareReplayBuffer
+        algo_kwargs["replay_buffer_kwargs"] = {
+            "base_gamma": algo_kwargs["gamma"],
+            "dt_default": dt_default,
+        }
+
     # Setup algorithms
-    if algo == "sac":
+    if algo in {"sac", "sac_time_aware"}:
         DefaultAlgo = partial(SAC, policy_kwargs=policy_kwargs)
     elif algo == "ppo":
         DefaultAlgo = partial(PPO, policy_kwargs=policy_kwargs)
@@ -225,6 +242,7 @@ def run_sb3_benchmark(
         "MlpPolicy",
         train_env,
         seed=seed,
+        device=device,
         **algo_kwargs,
     )
     model.set_logger(logger)
@@ -262,10 +280,20 @@ def run_sb3_benchmark(
     print(
         f"\n[SB3 {algo.upper()}] env={env_id} mode={mode}\n"
         f"total_timesteps={total_timesteps}; n_eval_episodes={n_eval_episodes}\n\n"
-        f"increment_modeling={increment_modeling}"
+        f"increment_modeling={increment_modeling or time_aware}\n"
+        f"time_aware={time_aware}"
     )
-    if increment_modeling:
+    if increment_modeling and not time_aware:
         print(f"  new_gamma={algo_kwargs.get('gamma')}\n")
+    if time_aware:
+        beta_step = -math.log(algo_kwargs["gamma"])
+        discount_rate = beta_step / dt_default
+        print(
+            "  discount(dt)=exp(-lambda*dt)"
+            "=exp(-beta_step*dt/dt_default), "
+            f"lambda={discount_rate:.8g}, "
+            f"beta_step={beta_step:.8g}, dt_default={dt_default}\n"
+        )
     print(f"\npolicy_kwargs={policy_kwargs}\n")
     print(f"env_meta={env_meta}\n")
     print(f"eval_env_meta={eval_env_meta}\n")
@@ -346,6 +374,12 @@ def parse_args():
         help="If set, use reward increment modeling with adjusted gamma.",
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="Torch device used by SB3, e.g. 'auto', 'cpu', 'cuda', or 'mps'.",
+    )
+    parser.add_argument(
         "--n_eval_episodes",
         type=int,
         default=10,
@@ -382,6 +416,7 @@ def main():
                 total_timesteps_override=args.total_timesteps,
                 desc=args.desc,
                 increment_modeling=args.increment_modeling,
+                device=args.device,
                 n_eval_episodes=args.n_eval_episodes,
                 eval_range=eval_range,
             )

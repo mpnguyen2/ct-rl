@@ -204,16 +204,16 @@ def aggregate_seed_curves(
 
 def find_seed_eval_npz(mode_dir: Path) -> Dict[str, Path]:
     """
-    mode_dir structure:
+    Supported mode_dir structures:
       .../<mode>/seed_0/eval/evaluations.npz
-      .../<mode>/seed_1/eval/evaluations.npz
+      .../<mode>/seed_0/<run_name>/eval/evaluations.npz
     """
     out: Dict[str, Path] = {}
     for seed_dir in sorted(mode_dir.glob("seed_*")):
         if not seed_dir.is_dir():
             continue
         seed_name = seed_dir.name.replace("seed_", "")
-        npz = seed_dir / "eval" / "evaluations.npz"
-        if npz.exists():
-            out[seed_name] = npz
+        candidates = list(seed_dir.glob("**/eval/evaluations.npz"))
+        if candidates:
+            out[seed_name] = max(candidates, key=lambda path: path.stat().st_mtime)
     return out
